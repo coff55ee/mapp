@@ -165,7 +165,6 @@ const PHASE_NAMES = { check: "確認問題", locate: "位置問題", spot: "抜�
 const DRILL_KINDS = {
   national10: { title: "全国ランダム10問", desc: ["位置と県名を、", "全国の地図で", "10問"] },
   national47: { title: "全国47問テスト", desc: ["47都道府県", "すべての位置"] },
-  adjacent: { title: "隣接県クイズ", desc: ["陸で接する県を", "選ぶ問題を10問"] },
   daily: { title: "今日の復習", desc: ["苦手な県と、", "しばらく", "出ていない県から", "10問"] }
 };
 
@@ -495,10 +494,10 @@ function showHome() {
     return `<button class="reg ${p ? "passed" : ""} ${nr && nr.id === r.id ? "next" : ""}" data-r="${r.id}"><div class="nm">${esc(r.name)}${nr && nr.id === r.id ? ' <span class="muted">次はここ</span>' : ""}</div><div class="st">${nw(countLabel(r))}・${nw(st)}</div></button>`;
   }).join("");
   const z = { asked: 0, correct: 0, wrong: 0, unanswered: 0 };
-  const weak = ALL_IDS.map(id => [id, REC.stats[id] || z, REC.adjStats[id] || z])
+  const weak = ALL_IDS.map(id => [id, REC.stats[id] || z, z])
     .filter(([, s, a]) => (s.wrong + s.unanswered + a.wrong + a.unanswered) > 0)
     .sort((x, y) => (missRate(y[1]) + missRate(y[2])) - (missRate(x[1]) + missRate(x[2])) || (y[1].wrong + y[1].unanswered + y[2].wrong + y[2].unanswered) - (x[1].wrong + x[1].unanswered + x[2].wrong + x[2].unanswered)).slice(0, 8);
-  const weakHtml = weak.length ? `<table class="mini"><tr><th>県</th><th class="n">位置 出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th><th class="n">隣接 正解/出題</th></tr>${weak.map(([id, s, a]) => `<tr><td>${esc(ITEM[id].name)}</td><td class="n">${s.asked}</td><td class="n">${s.correct}</td><td class="n">${s.wrong}</td><td class="n">${s.unanswered}</td><td class="n">${a.asked ? a.correct + "/" + a.asked : "－"}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
+  const weakHtml = weak.length ? `<table class="mini"><tr><th>県</th><th class="n">出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th></tr>${weak.map(([id, s, a]) => `<tr><td>${esc(ITEM[id].name)}</td><td class="n">${s.asked}</td><td class="n">${s.correct}</td><td class="n">${s.wrong}</td><td class="n">${s.unanswered}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
   const sess = REC.sessions.slice(-6).reverse();
   const sessHtml = sess.length ? `<table class="mini"><tr><th>日付</th><th>地方</th><th>結果</th></tr>${sess.map(s => `<tr><td>${esc(s.date)}</td><td>${esc(s.mode === "drill" ? (DRILL_KINDS[s.kind] || {}).title || "全国" : (REGION[s.region] || {}).name || s.region)}</td><td class="jp">${s.mode === "drill" ? (s.status === "quit" ? "中断" : "") + (s.drill ? `${s.drill.correct}/${s.drill.asked}問正解` : "") : (s.status === "pass" ? "合格" : s.status === "quit" ? "中断" : "不合格") + (s.test ? `（テスト ${s.test.correct}/${s.test.asked}）` : "")}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
   const cur = loadCurrent();
@@ -901,10 +900,8 @@ function buildDrill(kind) {
   if (kind === "national47") return shuffle(ALL_IDS.slice()).map(id => ({ id, type: "locate" }));
   if (kind === "national10") return shuffle(ALL_IDS.slice()).slice(0, 10).map((id, i) => ({ id, type: i % 2 ? "check" : "locate" }));
   if (kind === "adjacent") return weightedPick(ADJ_IDS, id => reviewWeight(REC.adjStats[id]), 10).map(id => ({ id, type: "adj" }));
-  // 今日の復習：位置7問＋隣接3問
-  const loc = weightedPick(ALL_IDS, id => reviewWeight(REC.stats[id]), 7);
-  const adj = weightedPick(ADJ_IDS.filter(i => !loc.includes(i)), id => reviewWeight(REC.adjStats[id]), 3);
-  return shuffle(loc.map(id => ({ id, type: "locate" })).concat(adj.map(id => ({ id, type: "adj" }))));
+  // 今日の復習：位置問題7問＋確認問題3問
+  return weightedPick(ALL_IDS, id => reviewWeight(REC.stats[id]), 10).map((id, i) => ({ id, type: i < 7 ? "locate" : "check" }));
 }
 function startDrill(kind) {
   S = { mode: "drill", kind, title: DRILL_KINDS[kind].title, region: null, phase: "drill", queue: buildDrill(kind), idx: 0,
@@ -983,7 +980,7 @@ function finishDrill() {
   render(); fitTo(JAPAN_BOX, 0.02);
   setStatus(`<span class="tag">${esc(S.title)}</span><span>結果</span>`);
   const d = snap.drill;
-  setPrompt(`${d.correct}/${d.asked}問 正解<span class="small">${wrong.length ? "地図の赤は位置を間違えた県、黄色は隣接県を間違えた県です" : "全問正解でした"}</span>`);
+  setPrompt(`${d.correct}/${d.asked}問 正解<span class="small">${wrong.length ? "地図の赤が間違えた県です" : "全問正解でした"}</span>`);
   const row = (n, c) => `<tr><td>${n}</td><td class="n">${c.asked}</td><td class="n">${c.correct}</td><td class="n">${c.wrong}</td><td class="n">${c.unanswered}</td></tr>`;
   panel.innerHTML = `<table class="mini result-table"><tr><th></th><th class="n">出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th></tr>
     ${row("出題", d)}${snap.review.asked ? row("復習の再出題", snap.review) : ""}</table>
