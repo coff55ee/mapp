@@ -111,6 +111,7 @@ footer a{color:#3d6f9e}
 .result-table td.n{font-variant-numeric:tabular-nums}
 .big{font-size:20px;font-weight:700}
 .hidden{display:none!important}
+.nw{white-space:nowrap}
 @media (min-width:760px){
   body.session #mainrow{display:flex;flex-direction:row;flex:1;min-height:0}
   body.session #mapcol{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
@@ -160,7 +161,13 @@ const ITEM = Object.fromEntries(DS.items.map(i => [i.id, i]));
 const REGION = Object.fromEntries(DS.regions.map(r => [r.id, r]));
 const regionOfItem = id => REGION[ITEM[id].region];
 const DEFAULT_PASSED = ["hokkaido", "tohoku", "kanto", "chubu"];
-const PHASE_NAMES = { check: "確認問題", locate: "位置問題", spot: "抜き打ち", review: "復習の再出題", test: "白地図テスト" };
+const PHASE_NAMES = { check: "確認問題", locate: "位置問題", spot: "抜き打ち", review: "復習の再出題", test: "白地図テスト", drill: "出題" };
+const DRILL_KINDS = {
+  national10: { title: "全国ランダム10問", desc: ["位置と県名を、", "全国の地図で", "10問"] },
+  national47: { title: "全国47問テスト", desc: ["47都道府県", "すべての位置"] },
+  adjacent: { title: "隣接県クイズ", desc: ["陸で接する県を", "選ぶ問題を10問"] },
+  daily: { title: "今日の復習", desc: ["苦手な県と、", "しばらく", "出ていない県から", "10問"] }
+};
 
 /* ===== 小道具 ===== */
 const $ = s => document.querySelector(s);
@@ -168,6 +175,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 const zc = () => ({ asked: 0, correct: 0, wrong: 0, unanswered: 0 });
+// 日付・数字＋単位・県名などを途中で改行させない
+const nw = t => esc(t).replace(/(\d{4}-\d{2}-\d{2}|\d+(?:都道府県|問|県|都|道|府)?(?:\/\d+)?|[^\s、。・（）()]{1,5}(?:都|道|府|県)(?=[、。・（）()\s]|$))/g, '<span class="nw">$1</span>');
 const pct = (a, b) => b ? Math.round(a / b * 100) + "%" : "－";
 
 /* ===== 記録（ブラウザ保存。使えなければメモリだけで動く） ===== */
@@ -177,7 +186,7 @@ try { localStorage.setItem("__chizu_t", "1"); localStorage.removeItem("__chizu_t
 function newRecord() {
   const passed = {};
   DEFAULT_PASSED.forEach(r => passed[r] = { date: null, how: "manual" });
-  return { app: "chizu-anki", version: 1, dataset: DS.id, passed, stats: {}, sessions: [], settings: { spot: 3 } };
+  return { app: "chizu-anki", version: 1, dataset: DS.id, passed, stats: {}, adjStats: {}, sessions: [], settings: { spot: 3 } };
 }
 function loadRecord() {
   if (!storageOK) return newRecord();
@@ -186,6 +195,7 @@ function loadRecord() {
 function validRecord(r) { return r && typeof r === "object" && r.app === "chizu-anki" && r.dataset === DS.id && r.passed && typeof r.passed === "object"; }
 function normalize(r) {
   r.stats = r.stats && typeof r.stats === "object" ? r.stats : {};
+  r.adjStats = r.adjStats && typeof r.adjStats === "object" ? r.adjStats : {};
   r.sessions = Array.isArray(r.sessions) ? r.sessions : [];
   r.settings = Object.assign({ spot: 3 }, r.settings || {});
   for (const k of Object.keys(r.passed)) if (!REGION[k]) delete r.passed[k];
@@ -206,10 +216,14 @@ function saveCurrent() {
 function loadCurrent() {
   if (!storageOK) return null;
   try { const s = localStorage.getItem(CUR_KEY); if (!s) return null; const c = JSON.parse(s);
-    if (!c || !REGION[c.region] || !Array.isArray(c.queue) || c.phase === "done") return null;
+    if (!c || !(REGION[c.region] || c.mode === "drill") || !Array.isArray(c.queue) || c.phase === "done") return null;
     c.stillWrong = new Set(c.stillWrong || []); return c; } catch (e) { return null; }
 }
 function clearCurrent() { try { localStorage.removeItem(CUR_KEY); } catch (e) {} }
+function bumpAdj(id, kind) {
+  const s = REC.adjStats[id] || (REC.adjStats[id] = { asked: 0, correct: 0, wrong: 0, unanswered: 0, last: null });
+  s.asked++; s[kind]++; s.last = today();
+}
 function bumpStat(id, kind) {
   const s = REC.stats[id] || (REC.stats[id] = { asked: 0, correct: 0, wrong: 0, unanswered: 0, last: null });
   s.asked++; s[kind]++; s.last = today();
@@ -478,21 +492,28 @@ function showHome() {
   const regs = DS.regions.map(r => {
     const p = REC.passed[r.id];
     const st = p ? (p.how === "manual" ? "合格（以前の合格・手動設定）" : "合格 " + p.date) : "未合格";
-    return `<button class="reg ${p ? "passed" : ""} ${nr && nr.id === r.id ? "next" : ""}" data-r="${r.id}"><div class="nm">${esc(r.name)}${nr && nr.id === r.id ? ' <span class="muted">次はここ</span>' : ""}</div><div class="st">${countLabel(r)}・${esc(st)}</div></button>`;
+    return `<button class="reg ${p ? "passed" : ""} ${nr && nr.id === r.id ? "next" : ""}" data-r="${r.id}"><div class="nm">${esc(r.name)}${nr && nr.id === r.id ? ' <span class="muted">次はここ</span>' : ""}</div><div class="st">${nw(countLabel(r))}・${nw(st)}</div></button>`;
   }).join("");
-  const weak = Object.entries(REC.stats).filter(([id, s]) => ITEM[id] && s.asked > 0 && (s.wrong + s.unanswered) > 0)
-    .sort((a, b) => ((b[1].wrong + b[1].unanswered) / b[1].asked) - ((a[1].wrong + a[1].unanswered) / a[1].asked) || (b[1].wrong + b[1].unanswered) - (a[1].wrong + a[1].unanswered)).slice(0, 8);
-  const weakHtml = weak.length ? `<table class="mini"><tr><th>県</th><th>地方</th><th class="n">出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th></tr>${weak.map(([id, s]) => `<tr><td>${esc(ITEM[id].name)}</td><td>${esc(regionOfItem(id).name)}</td><td class="n">${s.asked}</td><td class="n">${s.correct}</td><td class="n">${s.wrong}</td><td class="n">${s.unanswered}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
+  const z = { asked: 0, correct: 0, wrong: 0, unanswered: 0 };
+  const weak = ALL_IDS.map(id => [id, REC.stats[id] || z, REC.adjStats[id] || z])
+    .filter(([, s, a]) => (s.wrong + s.unanswered + a.wrong + a.unanswered) > 0)
+    .sort((x, y) => (missRate(y[1]) + missRate(y[2])) - (missRate(x[1]) + missRate(x[2])) || (y[1].wrong + y[1].unanswered + y[2].wrong + y[2].unanswered) - (x[1].wrong + x[1].unanswered + x[2].wrong + x[2].unanswered)).slice(0, 8);
+  const weakHtml = weak.length ? `<table class="mini"><tr><th>県</th><th class="n">位置 出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th><th class="n">隣接 正解/出題</th></tr>${weak.map(([id, s, a]) => `<tr><td>${esc(ITEM[id].name)}</td><td class="n">${s.asked}</td><td class="n">${s.correct}</td><td class="n">${s.wrong}</td><td class="n">${s.unanswered}</td><td class="n">${a.asked ? a.correct + "/" + a.asked : "－"}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
   const sess = REC.sessions.slice(-6).reverse();
-  const sessHtml = sess.length ? `<table class="mini"><tr><th>日付</th><th>地方</th><th>結果</th></tr>${sess.map(s => `<tr><td>${esc(s.date)}</td><td>${esc((REGION[s.region] || {}).name || s.region)}</td><td class="jp">${s.status === "pass" ? "合格" : s.status === "quit" ? "中断" : "不合格"}${s.test ? `（テスト ${s.test.correct}/${s.test.asked}）` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
+  const sessHtml = sess.length ? `<table class="mini"><tr><th>日付</th><th>地方</th><th>結果</th></tr>${sess.map(s => `<tr><td>${esc(s.date)}</td><td>${esc(s.mode === "drill" ? (DRILL_KINDS[s.kind] || {}).title || "全国" : (REGION[s.region] || {}).name || s.region)}</td><td class="jp">${s.mode === "drill" ? (s.status === "quit" ? "中断" : "") + (s.drill ? `${s.drill.correct}/${s.drill.asked}問正解` : "") : (s.status === "pass" ? "合格" : s.status === "quit" ? "中断" : "不合格") + (s.test ? `（テスト ${s.test.correct}/${s.test.asked}）` : "")}</td></tr>`).join("")}</table>` : `<p class="muted">まだ記録がありません。</p>`;
   const cur = loadCurrent();
-  const curHtml = cur ? `<div class="card resume"><h2>前回の続き</h2><p class="jp" style="margin:0 0 6px">${esc(REGION[cur.region].name)}・${esc(PHASE_NAMES[cur.phase] || "")}${cur.phase === "test" ? "" : `（${Math.min(cur.idx + 1, cur.queue.length)}/${cur.queue.length}問目あたり）`}</p>
+  const curHtml = cur ? `<div class="card resume"><h2>前回の続き</h2><p class="jp" style="margin:0 0 6px">${esc(cur.mode === "drill" ? cur.title : REGION[cur.region].name)}・${esc(PHASE_NAMES[cur.phase] || "")}${cur.phase === "test" ? "" : `（${Math.min(cur.idx + 1, cur.queue.length)}/${cur.queue.length}問目あたり）`}</p>
     <div class="row"><button class="btn blue" id="resumeBtn">続きから</button><button class="btn ghost" id="discardBtn">破棄する</button></div></div>` : "";
-  panel.innerHTML = curHtml + `
+  const allPassed = DS.regions.every(r => REC.passed[r.id]);
+  const lastDaily = [...REC.sessions].reverse().find(x => x.mode === "drill" && x.kind === "daily" && x.status === "done");
+  const drillHtml = `<div class="card ${allPassed ? "resume" : ""}"><h2>全国で確かめる${allPassed ? "（全地方合格済み）" : ""}</h2>
+    <p class="muted jp" style="margin:0 0 8px">地方のヒントなしで、全国の地図から答えます。県名はすべて伏せています。${lastDaily ? `今日の復習の最終実施：${nw(lastDaily.date)}` : ""}</p>
+    <div class="regions">${Object.entries(DRILL_KINDS).map(([k, v]) => `<button class="reg" data-drill="${k}"><div class="nm">${nw(v.title)}</div><div class="st">${v.desc.map(t => `<span class="nw">${esc(t)}</span>`).join("")}</div></button>`).join("")}</div></div>`;
+  panel.innerHTML = curHtml + (allPassed ? drillHtml : "") + `
   <div class="card"><h2>地方を選んで学習</h2>
     <div class="regions">${regs}</div>
     <p class="muted jp">進め方：確認問題 → 位置問題 → 間違えた県の復習 → 白地図テスト（全問正解で合格）。合格済みの地方からは抜き打ち問題が入ります。</p>
-  </div>
+  </div>${allPassed ? "" : drillHtml}
   <div class="card"><h2>よく間違える県</h2>${weakHtml}</div>
   <div class="card"><h2>最近の学習</h2>${sessHtml}</div>
   <div class="card"><h2>合格済みの地方を変更</h2>
@@ -511,6 +532,7 @@ function showHome() {
     <div class="row"><button class="btn ghost" id="resetBtn">記録をすべて消す</button></div>
   </div>`;
   panel.querySelectorAll("[data-r]").forEach(b => b.onclick = () => startRegion(b.dataset.r));
+  panel.querySelectorAll("[data-drill]").forEach(b => b.onclick = () => startDrill(b.dataset.drill));
   if (cur) {
     $("#resumeBtn").onclick = () => resumeSession(cur);
     $("#discardBtn").onclick = () => modal("途中の学習を破棄しますか？（解答済みの分は県ごとの記録に残っています）", [["やめる", "", null], ["破棄する", "primary", () => { clearCurrent(); showHome(); }]]);
@@ -551,7 +573,7 @@ function resumeSession(c) {
   S = c;
   setMode("session");
   panel.innerHTML = "";
-  fitTo(regionBox(S.region));
+  fitTo(isDrill() ? JAPAN_BOX : regionBox(S.region));
   if (S.phase === "test") { S.testRound--; return startTest(); }
   if (S.answered === S.idx) S.idx++;
   nextQ();
@@ -567,18 +589,28 @@ function startRegion(rid) {
   fitTo(regionBox(rid));
   nextQ();
 }
+const isDrill = () => S && S.mode === "drill";
+function sessionTag() { return isDrill() ? S.title : REGION[S.region].name; }
+function nationalView() {
+  view = { focusRegion: null, hidden: new Set(DS.items.map(i => i.id)), cls: {}, labelText: {}, labelCls: {}, forceLabel: new Set(), home: false, lm: new Set() };
+}
+const JAPAN_BOX = [0, 0, DS.W, DS.H];
+function boxAround(id, minSize) {
+  const b = id === "47" ? boundsOf(["47"], true) : ITEM[id].b;
+  const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, h = Math.max(b[2] - b[0], b[3] - b[1], minSize) * 0.85;
+  return [cx - h, cy - h, cx + h, cy + h];
+}
 function baseView(rid, extraHidden) {
   const hidden = new Set(REGION[rid].items);
   (extraHidden || []).forEach(i => hidden.add(i));
   view = { focusRegion: rid, hidden, cls: {}, labelText: {}, labelCls: {}, forceLabel: new Set(), home: false, lm: new Set() };
 }
 function statusLine() {
-  const reg = REGION[S.region];
   const ph = S.phase;
   const c = S.counts[ph === "locate" ? "locate" : ph] || zc();
   const total = S.queue.length;
   const q = S.queue[S.idx];
-  let tags = `<span class="tag">${esc(reg.name)}</span><span>${PHASE_NAMES[ph] || ""} ${Math.min(S.idx + 1, total)}/${total}</span>`;
+  let tags = `<span class="tag">${esc(sessionTag())}</span><span>${PHASE_NAMES[ph] || ""} ${Math.min(S.idx + 1, total)}/${total}</span>`;
   if (q && q.spot) tags += `<span class="tag spot">抜き打ち（合格済みの地方から）</span>`;
   if (ph !== "test") tags += `<span>正解 ${c.correct}・不正解 ${c.wrong}・未回答 ${c.unanswered}</span>`;
   setStatus(tags);
@@ -592,9 +624,14 @@ function nextQ() {
   if (q.type === "check") askCheck(q);
   else if (q.type === "locate") askLocate(q);
   else if (q.type === "reviewcard") showReviewCard(q);
+  else if (q.type === "adj") askAdj(q);
 }
 function advance() { S.idx++; nextQ(); }
 function endPhase() {
+  if (isDrill()) {
+    if (S.phase === "drill") return startDrillReview();
+    return finishDrill();
+  }
   if (S.phase === "check") {
     S.phase = "locate";
     const own = shuffle(REGION[S.region].items.slice()).map(id => ({ id, type: "locate" }));
@@ -611,7 +648,7 @@ function endPhase() {
 }
 function interstitial(title, text, go) {
   onMapTap = null;
-  setStatus(`<span class="tag">${esc(REGION[S.region].name)}</span>`);
+  setStatus(`<span class="tag">${esc(sessionTag())}</span>`);
   setPrompt(esc(title));
   panel.innerHTML = `<p class="jp">${esc(text)}</p><div class="row"><button class="btn primary" id="goBtn">始める</button></div>`;
   $("#goBtn").onclick = go;
@@ -633,13 +670,16 @@ function addMissed(id) { if (!S.missed.includes(id)) S.missed.push(id); }
 /* 確認問題：色のついた県の名前を選ぶ */
 function askCheck(q) {
   const it = ITEM[q.id];
-  baseView(S.region);
-  view.cls[q.id] = "hl";
-  render();
-  const b = it.b; const inView = b[0] >= cam.x && b[2] <= cam.x + cam.w && b[1] >= cam.y && b[3] <= cam.y + cam.h;
-  if (!inView) fitTo(regionBox(S.region));
+  if (isDrill()) { nationalView(); view.cls[q.id] = "hl"; render(); fitTo(boxAround(q.id, 420), 0); }
+  else {
+    baseView(S.region);
+    view.cls[q.id] = "hl";
+    render();
+    const b = it.b; const inView = b[0] >= cam.x && b[2] <= cam.x + cam.w && b[1] >= cam.y && b[3] <= cam.y + cam.h;
+    if (!inView) fitTo(regionBox(S.region));
+  }
   setPrompt(`色のついた県はどこ？<span class="small">選択肢から県名を選んでください</span>`);
-  const regItems = REGION[S.region].items.filter(i => i !== q.id);
+  const regItems = isDrill() ? DS.items.map(i => i.id).filter(i => i !== q.id).sort((a, b) => dist(a, q.id) - dist(b, q.id)).slice(0, 5) : REGION[S.region].items.filter(i => i !== q.id);
   let cand = shuffle([...new Set(regItems.concat(it.nb))].filter(i => i !== q.id));
   const nbFirst = shuffle(it.nb.filter(i => regItems.includes(i)));
   let pick = [...new Set(nbFirst.concat(cand))].slice(0, 3);
@@ -652,7 +692,7 @@ function askCheck(q) {
   const finish = (chosen) => {
     panel.querySelectorAll("[data-o]").forEach(b => { b.disabled = true; if (b.dataset.o === q.id) b.classList.add("right"); else if (b.dataset.o === chosen) b.classList.add("wrong"); });
     const kind = chosen == null ? "unanswered" : chosen === q.id ? "correct" : "wrong";
-    record("check", q.id, kind);
+    record(isDrill() ? "drill" : "check", q.id, kind);
     if (kind !== "correct") addMissed(q.id);
     view.cls[q.id] = kind === "correct" ? "ok" : "ng"; view.forceLabel.add(q.id); view.labelCls[q.id] = kind === "correct" ? "okl" : "ngl"; view.lm.add(q.id); render();
     saveCurrent();
@@ -671,13 +711,19 @@ function dist(a, b) { const A = ITEM[a], B = ITEM[b]; return Math.hypot(A.lx - B
 function askLocate(q) {
   const it = ITEM[q.id];
   const rid = it.region;
+  if (isDrill()) {
+    nationalView(); render();
+    if (q.refit || fitBox.join() !== JAPAN_BOX.join()) fitTo(JAPAN_BOX, 0.02);
+  } else {
   baseView(rid, REGION[S.region].items);
   if (q.spot) view.focusRegion = null;
   render();
-  if (q.spot) { const b = regionBox(rid), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, hw = Math.max(b[2] - b[0], 260) * 0.9, hh = Math.max(b[3] - b[1], 260) * 0.9; fitTo([cx - hw, cy - hh, cx + hw, cy + hh], 0); }
+  }
+  if (isDrill()) {}
+  else if (q.spot) { const b = regionBox(rid), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, hw = Math.max(b[2] - b[0], 260) * 0.9, hh = Math.max(b[3] - b[1], 260) * 0.9; fitTo([cx - hw, cy - hh, cx + hw, cy + hh], 0); }
   else if (q.refit) fitTo(regionBox(rid));
   else if (fitBox && regionBox(rid).join() !== fitBox.join()) fitTo(regionBox(rid));
-  setPrompt(`「${esc(it.name)}」はどこ？<span class="small">地図でタップして選び、もう一度タップするか「この県で回答」で決定</span>`);
+  setPrompt(`「${esc(it.name)}」はどこ？<span class="small">${isDrill() ? "小さい県は指で拡大してから選んでください。" : ""}地図でタップして選び、もう一度タップするか「この県で回答」で決定</span>`);
   panel.innerHTML = `<div class="feedback" id="fb">まだ選んでいません</div>
    <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn blue" id="ansBtn" disabled>この県で回答</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
   let sel = null, done = false;
@@ -689,7 +735,7 @@ function askLocate(q) {
     $("#fb").textContent = "青が選んだ県です。もう一度タップするか「この県で回答」で決定";
     $("#ansBtn").disabled = false;
   };
-  const phaseKey = q.spot ? "spot" : (S.phase === "review" ? "review" : "locate");
+  const phaseKey = q.spot ? "spot" : (S.phase === "review" ? "review" : (isDrill() ? "drill" : "locate"));
   const finish = chosen => {
     done = true; onMapTap = null;
     const kind = chosen == null ? "unanswered" : chosen === q.id ? "correct" : "wrong";
@@ -740,11 +786,11 @@ function showReviewCard(q) {
   render();
   const ids = [q.id].concat(it.nb);
   fitTo(boundsOf(ids, q.id === "47"), 0.15);
-  setPrompt(`${esc(it.name)}を復習<span class="small">オレンジが${esc(it.name)}、黄色が陸で接する県です</span>`);
+  setPrompt(`${esc(it.name)}を復習<span class="small">オレンジが${esc(it.name)}、黄色が陸で接する県です${q.kind === "adj" ? "。このあと隣接県をもう一度答えます" : ""}</span>`);
   panel.innerHTML = `<p class="jp" style="margin:4px 0">${esc(neighborText(it))}</p><div class="hint jp">目印：${esc(it.hint)}</div>
    <div class="row"><button class="btn primary" id="againBtn">覚えた。もう一度出題</button></div>`;
   onMapTap = null;
-  $("#againBtn").onclick = () => { S.queue.splice(S.idx + 1, 0, { id: q.id, type: "locate", refit: true, tries: q.tries }); advance(); };
+  $("#againBtn").onclick = () => { S.queue.splice(S.idx + 1, 0, { id: q.id, type: q.kind === "adj" ? "adj" : "locate", refit: true, tries: q.tries }); advance(); };
 }
 
 /* 白地図テスト：その地方の全部の県に名前を入れる */
@@ -830,10 +876,127 @@ function grade(ans) {
   clearCurrent();
 }
 $("#quitBtn").onclick = () => modal("学習を中断してホームに戻りますか？（ここまでの解答は県ごとの記録に残ります）", [["続ける", "", null], ["中断する", "primary", () => {
-  if (S && S.phase !== "done" && Object.values(S.counts).some(c => c.asked)) { REC.sessions.push({ date: today(), region: S.region, status: "quit", check: S.counts.check, locate: S.counts.locate, spot: S.counts.spot, review: S.counts.review }); save(); }
+  if (S && S.phase !== "done" && Object.values(S.counts).some(c => c.asked)) { REC.sessions.push(isDrill() ? { date: today(), mode: "drill", kind: S.kind, status: "quit", drill: S.counts.drill, review: S.counts.review } : { date: today(), region: S.region, status: "quit", check: S.counts.check, locate: S.counts.locate, spot: S.counts.spot, review: S.counts.review }); save(); }
   clearCurrent();
   showHome();
 }]]);
+
+/* ===== 全国モード（全国の地図・隣接県・今日の復習） ===== */
+const daysSince = d => { if (!d) return 999; const t = new Date(d + "T00:00:00"); return Math.max(0, Math.round((Date.now() - t.getTime()) / 86400000)); };
+const missRate = s => s && s.asked ? (s.wrong + s.unanswered) / s.asked : 0;
+function weightedPick(ids, weightOf, n) {
+  const pool = ids.slice(), w = pool.map(weightOf), out = [];
+  while (out.length < n && pool.length) {
+    const tot = w.reduce((a, b) => a + b, 0); let r = Math.random() * tot, i = 0;
+    for (; i < w.length - 1; i++) { r -= w[i]; if (r <= 0) break; }
+    out.push(pool[i]); pool.splice(i, 1); w.splice(i, 1);
+  }
+  return out;
+}
+// 間違いが多いほど、また最後に出てから日数がたつほど出やすくする
+function reviewWeight(st) { return 1 + 4 * missRate(st) + Math.min(daysSince(st && st.last), 14) / 3.5 + (st && st.asked ? 0 : 2); }
+const ALL_IDS = DS.items.map(i => i.id);
+const ADJ_IDS = DS.items.filter(i => i.nb.length).map(i => i.id);
+function buildDrill(kind) {
+  if (kind === "national47") return shuffle(ALL_IDS.slice()).map(id => ({ id, type: "locate" }));
+  if (kind === "national10") return shuffle(ALL_IDS.slice()).slice(0, 10).map((id, i) => ({ id, type: i % 2 ? "check" : "locate" }));
+  if (kind === "adjacent") return weightedPick(ADJ_IDS, id => reviewWeight(REC.adjStats[id]), 10).map(id => ({ id, type: "adj" }));
+  // 今日の復習：位置7問＋隣接3問
+  const loc = weightedPick(ALL_IDS, id => reviewWeight(REC.stats[id]), 7);
+  const adj = weightedPick(ADJ_IDS.filter(i => !loc.includes(i)), id => reviewWeight(REC.adjStats[id]), 3);
+  return shuffle(loc.map(id => ({ id, type: "locate" })).concat(adj.map(id => ({ id, type: "adj" }))));
+}
+function startDrill(kind) {
+  S = { mode: "drill", kind, title: DRILL_KINDS[kind].title, region: null, phase: "drill", queue: buildDrill(kind), idx: 0,
+        missed: [], missedAdj: [], counts: { drill: zc(), review: zc() }, answered: -1 };
+  setMode("session");
+  panel.innerHTML = "";
+  fitTo(JAPAN_BOX, 0.02);
+  nextQ();
+}
+function startDrillReview() {
+  const items = S.missed.map(id => ({ id, type: "reviewcard", tries: 0 })).concat(S.missedAdj.map(id => ({ id, type: "reviewcard", kind: "adj", tries: 0 })));
+  S.phase = "review"; S.idx = 0; S.stillWrong = new Set(S.missed.concat(S.missedAdj));
+  S.queue = items;
+  if (!items.length) return finishDrill();
+  interstitial("間違えた県の復習", `${items.length}問分を復習します。隣の県と目印を見てから、もう一度答えます。`, nextQ);
+}
+/* 隣接県クイズ：オレンジの県と陸で接する県をすべてタップ */
+function adjOptional(a, b) { return !!DS.neighborNotes[[a, b].sort().join("-")]; }
+function askAdj(q) {
+  const it = ITEM[q.id];
+  nationalView();
+  view.cls[q.id] = "hl"; view.forceLabel.add(q.id);
+  render();
+  fitTo(boxAround(q.id, 380), 0);
+  setPrompt(`「${esc(it.name)}」と陸で接する県をすべてタップ<span class="small">もう一度タップすると選択を外せます。選び終えたら「採点する」</span>`);
+  panel.innerHTML = `<div class="feedback" id="fb">選択中 0県</div>
+   <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn blue" id="ansBtn">採点する</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
+  const sel = new Set(); let done = false;
+  onMapTap = id => {
+    if (done || id === q.id) return;
+    if (sel.has(id)) { sel.delete(id); delete view.cls[id]; } else { sel.add(id); view.cls[id] = "sel"; }
+    render(); $("#fb").textContent = `選択中 ${sel.size}県`;
+  };
+  const phaseKey = S.phase === "review" ? "review" : "drill";
+  const finish = skipped => {
+    done = true; onMapTap = null;
+    const need = it.nb.filter(n => !adjOptional(q.id, n));
+    const missedN = need.filter(n => !sel.has(n));
+    const extra = [...sel].filter(n => !it.nb.includes(n));
+    const kind = skipped || (!sel.size && need.length) ? "unanswered" : (!missedN.length && !extra.length ? "correct" : "wrong");
+    const c = S.counts[phaseKey]; c.asked++; c[kind]++; bumpAdj(q.id, kind); S.answered = S.idx; save();
+    view.cls = {}; view.cls[q.id] = "hl";
+    for (const n of it.nb) { view.forceLabel.add(n); if (sel.has(n)) { view.cls[n] = "ok"; view.labelCls[n] = "okl"; } else { view.cls[n] = "nb"; } }
+    for (const n of extra) { view.cls[n] = "ng"; view.forceLabel.add(n); view.labelCls[n] = "ngl"; }
+    view.lm.add(q.id);
+    render();
+    fitTo(boundsOf([q.id].concat(it.nb, extra), q.id === "47"), 0.12);
+    const parts = [];
+    if (missedN.length) parts.push(`足りない：${missedN.map(n => ITEM[n].name).join("、")}（黄色）`);
+    if (extra.length) parts.push(`接していない：${extra.map(n => ITEM[n].name).join("、")}（赤）`);
+    const opt = it.nb.filter(n => adjOptional(q.id, n)).map(n => `${ITEM[n].name}は${DS.neighborNotes[[q.id, n].sort().join("-")]}ため、選んでも選ばなくても正解にしています`);
+    $("#fb").innerHTML = (kind === "correct" ? `<span class="ok">正解</span>　` : `<span class="ng">${kind === "wrong" ? "不正解" : "未回答"}</span>　`) +
+      `<span class="jp">${esc(neighborText(it))}</span>` + (parts.length ? `<br><span class="jp">${esc(parts.join("／"))}</span>` : "") + (opt.length ? `<br><span class="muted jp">${esc(opt.join("。"))}</span>` : "");
+    $("#ansBtn").classList.add("hidden"); $("#skipBtn").classList.add("hidden");
+    if (S.phase === "review") {
+      if (kind !== "correct") { const tries = (q.tries || 0) + 1; if (tries < 3) S.queue.push({ id: q.id, type: "reviewcard", kind: "adj", tries }); else S.stillWrong.add(q.id); }
+      else S.stillWrong.delete(q.id);
+    } else if (kind !== "correct" && !S.missedAdj.includes(q.id)) S.missedAdj.push(q.id);
+    saveCurrent();
+    const nb = $("#nextBtn"); nb.classList.remove("hidden"); nb.onclick = advance;
+    statusLine();
+  };
+  $("#ansBtn").onclick = () => finish(false);
+  $("#skipBtn").onclick = () => finish(true);
+}
+function finishDrill() {
+  onMapTap = null;
+  const snap = JSON.parse(JSON.stringify(S.counts));
+  REC.sessions.push({ date: today(), mode: "drill", kind: S.kind, status: "done", drill: snap.drill, review: snap.review });
+  if (REC.sessions.length > 200) REC.sessions = REC.sessions.slice(-200);
+  save();
+  const wrong = [...new Set(S.missed.concat(S.missedAdj))];
+  nationalView();
+  for (const id of S.missed) { view.cls[id] = "ng"; view.forceLabel.add(id); view.labelCls[id] = "ngl"; }
+  for (const id of S.missedAdj) { if (!view.cls[id]) { view.cls[id] = "nb"; view.forceLabel.add(id); } }
+  render(); fitTo(JAPAN_BOX, 0.02);
+  setStatus(`<span class="tag">${esc(S.title)}</span><span>結果</span>`);
+  const d = snap.drill;
+  setPrompt(`${d.correct}/${d.asked}問 正解<span class="small">${wrong.length ? "地図の赤は位置を間違えた県、黄色は隣接県を間違えた県です" : "全問正解でした"}</span>`);
+  const row = (n, c) => `<tr><td>${n}</td><td class="n">${c.asked}</td><td class="n">${c.correct}</td><td class="n">${c.wrong}</td><td class="n">${c.unanswered}</td></tr>`;
+  panel.innerHTML = `<table class="mini result-table"><tr><th></th><th class="n">出題</th><th class="n">正解</th><th class="n">不正解</th><th class="n">未回答</th></tr>
+    ${row("出題", d)}${snap.review.asked ? row("復習の再出題", snap.review) : ""}</table>
+    ${S.missed.length ? `<p class="jp">位置を間違えた県：${S.missed.map(i => esc(ITEM[i].name)).join("、")}</p>` : ""}
+    ${S.missedAdj.length ? `<p class="jp">隣接県を間違えた県：${S.missedAdj.map(i => esc(ITEM[i].name)).join("、")}</p>` : ""}
+    <div class="row"><button class="btn primary" id="againDrill">もう一度（${esc(S.title)}）</button></div>
+    <div class="row"><button class="btn" id="homeBtn">ホームに戻る</button></div>`;
+  const kind = S.kind;
+  $("#againDrill").onclick = () => startDrill(kind);
+  $("#homeBtn").onclick = showHome;
+  S.phase = "done";
+  clearCurrent();
+}
 
 /* ===== 出典 ===== */
 $("#footer").innerHTML = `<p class="jp"><b>地図の出典</b>：${esc(DS.source.text)}</p><p class="jp">${esc(DS.source.detail)}</p><p>${DS.source.links.map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)}</a>`).join("　")}</p><p class="jp">隣接関係は、このデータで県境の線を共有しているかどうかから求めています（岡山県と香川県は瀬戸内海の井島で接しています）。</p>`;
