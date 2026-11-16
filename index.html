@@ -7,8 +7,11 @@
 <meta name="description" content="実際の境界線の地図で、都道府県と世界の国の位置を覚えるクイズ">
 <meta name="theme-color" content="#f6f4ef">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="地図で覚える">
+<meta name="apple-mobile-web-app-title" content="地図">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{
   --bg:#f6f4ef; --card:#fff; --ink:#23262b; --sub:#5d6470; --line:#d9d5cc;
@@ -167,7 +170,7 @@ const DATA_WORLD={"id":"world","title":"世界の国","W":2020,"H":928,"regions"
 const DATASETS = { japan: DATA_JAPAN, world: DATA_WORLD };
 // モードごとの設定（世界モードは画面の文言の「県」「地方」などを「国」「地域」に置き換えて使う）
 const CFG = {
-  japan: { title: "地図で覚える都道府県", tab: "日本", defaultPassed: ["hokkaido", "tohoku", "kanto", "chubu"], minW: 25, boxMin: 420, word: "都道府県", scope: "全国" },
+  japan: { title: "地図で覚える都道府県", tab: "日本", defaultPassed: ["hokkaido", "tohoku", "kanto", "chubu", "kinki", "chugoku", "shikoku", "kyushu"], minW: 25, boxMin: 420, word: "都道府県", scope: "全国" },
   world: { title: "地図で覚える世界の国", tab: "世界", defaultPassed: [], minW: 3, boxMin: 170, word: "国・地域", scope: "全世界" }
 };
 let DS, ITEM, REGION, U, DEFAULT_PASSED = [];
@@ -617,7 +620,7 @@ function showHome() {
   };
   $("#impBtn").onclick = () => doImport($("#impText").value.trim());
   $("#impFile").onchange = e => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => doImport(String(rd.result)); rd.readAsText(f); };
-  $("#resetBtn").onclick = () => modal("記録をすべて消して、最初の状態（北海道・東北・関東・中部が合格済み）に戻しますか？", [["やめる", "", null], ["消す", "primary", () => { REC = newRecord(); save(); clearCurrent(); showHome(); }]]);
+  $("#resetBtn").onclick = () => modal("記録をすべて消して、最初の状態に戻しますか？", [["やめる", "", null], ["消す", "primary", () => { REC = newRecord(); save(); clearCurrent(); showHome(); }]]);
   requestAnimationFrame(() => fitTo([0, 0, DS.W, DS.H], 0.02));
 }
 
@@ -1069,6 +1072,11 @@ function loadDataset(id) {
   DRILL_KINDS = drillKinds();
   KEY = "chizu-anki:" + DS.id + ":v1"; CUR_KEY = KEY + ":current";
   REC = loadRecord();
+  // 2026-11-16：日本は全地方合格済みとして記録する（端末ごとの記録にも一度だけ反映）
+  if (DS.id === "japan" && !REC.allPassed20261116) {
+    for (const r of DS.regions) if (!REC.passed[r.id]) REC.passed[r.id] = { date: "2026-11-15", how: "manual" };
+    REC.allPassed20261116 = true; save();
+  }
   ALL_IDS = DS.items.map(i => i.id); ADJ_IDS = DS.items.filter(i => i.nb.length).map(i => i.id);
   DATA_BOX = [0, 0, DS.W, DS.H];
   buildMap();
