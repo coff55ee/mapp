@@ -454,7 +454,9 @@ function prefAt(cx, cy) {
   return found.size === 1 ? [...found][0] : null;
 }
 let onMapTap = null;
-function handleTap(cx, cy) { const id = prefAt(cx, cy); if (id && onMapTap) onMapTap(id); }
+function handleTap(cx, cy) { const id = prefAt(cx, cy); if (id && onMapTap) onMapTap(id, cx, cy); }
+// 画面上で小さく表示されている県か（指で選びにくい大きさ）
+function tinyOnScreen(id) { const b = ITEM[id].b, k = cam.w / svgSize().w; return Math.max(b[2] - b[0], b[3] - b[1]) / k < 32; }
 
 /* ===== 画面の部品 ===== */
 const panel = $("#panel");
@@ -505,8 +507,11 @@ function showHome() {
     <div class="row"><button class="btn blue" id="resumeBtn">続きから</button><button class="btn ghost" id="discardBtn">破棄する</button></div></div>` : "";
   const allPassed = DS.regions.every(r => REC.passed[r.id]);
   const lastDaily = [...REC.sessions].reverse().find(x => x.mode === "drill" && x.kind === "daily" && x.status === "done");
+  const best47 = REC.sessions.filter(x => x.mode === "drill" && x.kind === "national47" && x.status === "done" && x.drill)
+    .reduce((b, x) => (!b || x.drill.correct > b.drill.correct) ? x : b, null);
   const drillHtml = `<div class="card ${allPassed ? "resume" : ""}"><h2>全国で確かめる${allPassed ? "（全地方合格済み）" : ""}</h2>
     <p class="muted jp" style="margin:0 0 8px">地方のヒントなしで、全国の地図から答えます。県名はすべて伏せています。${lastDaily ? `今日の復習の最終実施：${nw(lastDaily.date)}` : ""}</p>
+    <p class="jp" style="margin:0 0 8px">全国47問テストの最高：${best47 ? `<span class="nw">${best47.drill.correct}/47問</span>（${nw(best47.date)}）${best47.drill.correct === 47 ? "　全問正解" : ""}` : "まだ受けていません"}</p>
     <div class="regions">${Object.entries(DRILL_KINDS).map(([k, v]) => `<button class="reg" data-drill="${k}"><div class="nm">${nw(v.title)}</div><div class="st">${v.desc.map(t => `<span class="nw">${esc(t)}</span>`).join("")}</div></button>`).join("")}</div></div>`;
   panel.innerHTML = curHtml + (allPassed ? drillHtml : "") + `
   <div class="card"><h2>地方を選んで学習</h2>
@@ -722,13 +727,14 @@ function askLocate(q) {
   else if (q.spot) { const b = regionBox(rid), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, hw = Math.max(b[2] - b[0], 260) * 0.9, hh = Math.max(b[3] - b[1], 260) * 0.9; fitTo([cx - hw, cy - hh, cx + hw, cy + hh], 0); }
   else if (q.refit) fitTo(regionBox(rid));
   else if (fitBox && regionBox(rid).join() !== fitBox.join()) fitTo(regionBox(rid));
-  setPrompt(`「${esc(it.name)}」はどこ？<span class="small">${isDrill() ? "小さい県は指で拡大してから選んでください。" : ""}地図でタップして選び、もう一度タップするか「この県で回答」で決定</span>`);
+  setPrompt(`「${esc(it.name)}」はどこ？<span class="small">${isDrill() ? "小さく見える県は、タップすると拡大します。" : ""}地図でタップして選び、もう一度タップするか「この県で回答」で決定</span>`);
   panel.innerHTML = `<div class="feedback" id="fb">まだ選んでいません</div>
    <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn blue" id="ansBtn" disabled>この県で回答</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
   let sel = null, done = false;
-  onMapTap = id => {
+  onMapTap = (id, cx, cy) => {
     if (done) return;
     if (id === sel) return finish(sel); // 選んだ県をもう一度タップしても回答できる
+    if (cx != null && tinyOnScreen(id)) { zoomAt(1 / 3, cx, cy); $("#fb").textContent = "拡大しました。もう一度タップして選んでください"; return; } // 小さい県は先に拡大する
     if (sel) delete view.cls[sel];
     sel = id; view.cls[id] = "sel"; render();
     $("#fb").textContent = "青が選んだ県です。もう一度タップするか「この県で回答」で決定";
