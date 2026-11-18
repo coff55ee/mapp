@@ -15,8 +15,8 @@
 <style>
 :root{
   --bg:#f6f4ef; --card:#fff; --ink:#23262b; --sub:#5d6470; --line:#d9d5cc;
-  --sea:#dcebf5; --lake:#a9cde9; --land:#f3ecdc; --out:#e4e2dd; --outink:#7a7f88;
-  --accent:#d9822b; --accent-soft:#f6d7b4; --sel:#4a8fd8; --sel-soft:#bcd8f5;
+  --sea:#dcebf5; --lake:#a9cde9; --land:#f3ecdc; --out:#e4e2dd; --outink:#5e636c;
+  --accent:#d9822b; --accent-soft:#f6d7b4; --act:#3b4a5a; --sel:#2f6db3; --sel-soft:#bcd8f5;
   --ok:#3f9d5a; --ok-soft:#bfe5c8; --ng:#d2554d; --ng-soft:#f4c4bf; --nb:#f3e3a6; --passed:#cfe7d4;
   color-scheme:light;
 }
@@ -57,15 +57,15 @@ body.session #panel{max-height:52dvh;overflow:auto}
 .marks circle.sel{stroke:var(--sel)} .marks circle.ok{stroke:var(--ok)} .marks circle.ng{stroke:var(--ng)} .marks circle.nb{stroke:#c9a227}
 .dstabs{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .dstabs button{border:0;background:#fff;padding:4px 12px;font-size:14px;min-height:34px}
-.dstabs button.on{background:var(--accent);color:#fff;font-weight:700}
+.dstabs button.on{background:var(--act);color:#fff;font-weight:700}
 .labels text,.seas text,.insetg text{paint-order:stroke;stroke:#fff;stroke-linejoin:round;pointer-events:none;text-anchor:middle;dominant-baseline:central}
 .labels text{fill:#2c2f35;font-weight:600}
 .labels text.outl{fill:var(--outink);font-weight:500}
 .labels text.ansl{fill:#1f5fa8}
 .labels text.q{fill:#9a8f78}
 .labels text.okl{fill:#1f6b35}
-.labels text.ngl{fill:#a3302a}
-.seas text{fill:#5f87a8;font-style:italic;stroke:none}
+.labels text.ngl{fill:#962a24}
+.seas text{fill:#4a7193;font-style:italic;stroke:none}
 .lms text{fill:#6b5232;font-weight:600;paint-order:stroke;stroke:#fff;stroke-linejoin:round;pointer-events:none;text-anchor:middle;dominant-baseline:central}
 .lms circle{fill:#6b5232;pointer-events:none}
 .resume{border:2px solid var(--sel);background:#f1f7fe}
@@ -79,12 +79,13 @@ body.session #panel{max-height:52dvh;overflow:auto}
 body.home #panel{background:transparent}
 .choices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btn{border:1px solid var(--line);background:#fff;border-radius:12px;min-height:46px;padding:8px 10px;font-size:16px;font-weight:600}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary{background:var(--act);border-color:var(--act);color:#fff}
 .btn.blue{background:var(--sel);border-color:var(--sel);color:#fff}
 .btn.ghost{background:transparent;font-weight:500;color:var(--sub)}
 .btn:disabled{opacity:.45;cursor:default}
 .btn.right{background:var(--ok-soft);border-color:var(--ok)}
 .btn.wrong{background:var(--ng-soft);border-color:var(--ng)}
+.btn.right:disabled,.btn.wrong:disabled{opacity:1}
 .row{display:flex;gap:8px;margin-top:8px}
 .row>.btn{flex:1}
 .feedback{font-size:15px;margin:6px 0 2px;min-height:24px}
@@ -102,7 +103,7 @@ body.home #panel{background:transparent}
 .reg .nm{font-weight:700;font-size:16px}
 .reg .st{font-size:13px;color:var(--sub)}
 .reg.passed{background:#eef8f0;border-color:#9fd0ab}
-.reg.next{border:2px solid var(--accent);background:#fff7ee}
+.reg.next{border:2px solid var(--act);background:#f3f5f7}
 .muted{color:var(--sub);font-size:13px}
 table.mini{width:100%;border-collapse:collapse;font-size:14px}
 table.mini td,table.mini th{padding:4px 4px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
@@ -121,8 +122,10 @@ footer a{color:#3d6f9e}
 .result-table td.n{font-variant-numeric:tabular-nums}
 .big{font-size:20px;font-weight:700}
 .hidden{display:none!important}
+button:focus-visible,a:focus-visible,select:focus-visible,textarea:focus-visible,label.btn:focus-within{outline:3px solid var(--sel);outline-offset:2px}
 .nw{white-space:nowrap}
-@media (min-width:760px){
+@media (min-width:1000px){
+  body.session #app{max-width:1280px}
   body.session #mainrow{display:flex;flex-direction:row;flex:1;min-height:0}
   body.session #mapcol{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
   body.session #panel{max-height:none;width:340px;flex:0 0 340px;border-left:1px solid var(--line);overflow:auto}
@@ -138,10 +141,10 @@ body.home #mainrow,body.home #mapcol{flex:0 0 auto}
     <div class="dstabs" id="dsTabs"></div>
     <button class="hbtn hidden" id="quitBtn">中断</button>
   </header>
-  <div id="mainrow">
+  <main id="mainrow">
     <div id="mapcol">
       <div id="status"></div>
-      <div id="prompt" class="jp"></div>
+      <div id="prompt" class="jp" aria-live="polite"></div>
       <div id="mapwrap">
         <svg id="map" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="日本地図"></svg>
         <div class="zoomctl">
@@ -153,7 +156,7 @@ body.home #mainrow,body.home #mapcol{flex:0 0 auto}
       </div>
     </div>
     <div id="panel"></div>
-  </div>
+  </main>
   <footer id="footer"></footer>
 </div>
 <script>
@@ -361,7 +364,7 @@ function updateLabels() {
     const txt = isHiddenPref(x.s.pref) ? x.hidden : x.full;
     x.t.textContent = txt;
     x.t.setAttribute("font-size", 10.5 * k); x.t.setAttribute("dy", x.dir * 10 * k);
-    x.t.style.display = (!txt || (cam.w > 1200 && x.dir > 0)) ? "none" : "";
+    x.t.style.display = (!txt || cam.w > 1200) ? "none" : "";
   }
   // 県名ラベル：小さすぎる県と、重なるラベルは出さない（強制表示のものを優先）
   const placed = [];
@@ -746,7 +749,7 @@ function askCheck(q) {
   if (pick.length < 3) { const more = shuffle(DS.items.map(i => i.id).filter(i => i !== q.id && !pick.includes(i))).sort((a, b) => dist(a, q.id) - dist(b, q.id)); pick = pick.concat(more.slice(0, 3 - pick.length)); }
   const opts = shuffle(pick.concat(q.id));
   panel.innerHTML = `<div class="choices">${opts.map(o => `<button class="btn" data-o="${o}">${esc(ITEM[o].name)}</button>`).join("")}</div>
-   <div class="feedback" id="fb"></div>
+   <div class="feedback" id="fb" role="status"></div>
    <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
   onMapTap = null;
   const finish = (chosen) => {
@@ -784,7 +787,7 @@ function askLocate(q) {
   else if (q.refit) fitTo(regionBox(rid));
   else if (fitBox && regionBox(rid).join() !== fitBox.join()) fitTo(regionBox(rid));
   setPrompt(`「${esc(it.name)}」はどこ？<span class="small">${isDrill() ? "小さく見える県は、タップすると拡大します。" : ""}地図でタップして選び、もう一度タップするか「この県で回答」で決定</span>`);
-  panel.innerHTML = `<div class="feedback" id="fb">まだ選んでいません</div>
+  panel.innerHTML = `<div class="feedback" id="fb" role="status">まだ選んでいません</div>
    <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn blue" id="ansBtn" disabled>この県で回答</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
   let sel = null, done = false;
   onMapTap = (id, cx, cy) => {
@@ -988,7 +991,7 @@ function askAdj(q) {
   render();
   fitTo(boxAround(q.id, U.boxMin), 0);
   setPrompt(`「${esc(it.name)}」と陸で接する県をすべてタップ<span class="small">もう一度タップすると選択を外せます。選び終えたら「採点する」</span>`);
-  panel.innerHTML = `<div class="feedback" id="fb">選択中 0県</div>
+  panel.innerHTML = `<div class="feedback" id="fb" role="status">選択中 0県</div>
    <div class="row"><button class="btn ghost" id="skipBtn">わからない</button><button class="btn blue" id="ansBtn">採点する</button><button class="btn primary hidden" id="nextBtn">次へ</button></div>`;
   const sel = new Set(); let done = false;
   onMapTap = id => {
